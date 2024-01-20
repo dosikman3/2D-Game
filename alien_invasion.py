@@ -1,8 +1,10 @@
 import sys
+from time import sleep
 
 import pygame
 
 from settings import Settings
+from game_stats import GameStats
 from ship import Ship
 from bullet import Bullet
 from alien import Alien
@@ -20,6 +22,9 @@ class AlienInvasion:
         self.settings.screen_height = self.screen.get_rect().height
         pygame.display.set_caption("Alien Invasion")
 
+        # Создание экземпляра для хранения игровой статистики
+        self.stats = GameStats(self)
+
         self.ship = Ship(self)
         self.bullets = pygame.sprite.Group()
         self.aliens = pygame.sprite.Group()
@@ -30,8 +35,11 @@ class AlienInvasion:
         # Запуск основного цикла игры.
         while True:
             self._check_events()
-            self.ship.update()
-            self._update_bullets()
+
+            if self.stats.game_active:
+                self.ship.update()
+                self._update_bullets()
+                self._update_aliens()
             self._update_screen()
 
     def _check_events(self):
@@ -77,6 +85,48 @@ class AlienInvasion:
             if bullet.rect.bottom <= 0:
                 self.bullets.remove(bullet)
 
+        self._check_bullet_alien_collision()
+
+    def _check_bullet_alien_collision(self):
+        # Проверка попаданий в пришельцев.
+        collisions = pygame.sprite.groupcollide(
+            self.bullets, self.aliens, True, True
+        )
+
+        if not self.aliens:
+            self.bullets.empty()
+            self._create_fleet()
+
+    def _update_aliens(self):
+        self._check_fleet_edges()
+        self.aliens.update()
+
+        # Проверка колизий "пришелец - корабль".
+        if pygame.sprite.spritecollideany(self.ship, self.aliens):
+            self._ship_hit()
+
+        # Проверка, добрались ли пришельцы до нижнего края экрана.
+        self._check_aliens_bottom()
+
+    def _ship_hit(self):
+        # Обрабатывает столкновение корабля с пришельцем.
+        if self.stats.ships_left > 0:
+            # Уменьшение ships_left
+            self.stats.ships_left -= 1
+
+            # Очистка списков пришельцев и снарядов.
+            self.aliens.empty()
+            self.bullets.empty()
+
+            # Создание нового флота и размещение корабля в центре.
+            self._create_fleet()
+            self.ship.center_ship()
+
+            # Пауза
+            sleep(0.5)
+        else:
+            self.stats.game_active = False
+
     def _create_fleet(self):
         # Создание флота пришельцев.
         # Создание пришельца т вычисление количества пришельцев в ряду
@@ -102,17 +152,37 @@ class AlienInvasion:
         # Создание пришельцев и размещение его в ряду.
         alien = Alien(self)
         alien_width, alien_height = alien.rect.size
-        alien.x = alien_width + 2.4 * alien_width * alien_number
+        alien.x = alien_width + 2 * alien_width * alien_number
         alien.rect.x = alien.x
         alien.rect.y = alien.rect.height + 2 * alien.rect.height * row_number
         self.aliens.add(alien)
+
+    def _check_fleet_edges(self):
+        for alien in self.aliens.sprites():
+            if alien.check_edges():
+                self._change_fleet_direction()
+                break
+
+    def _change_fleet_direction(self):
+        for alein in self.aliens.sprites():
+            alein.rect.y += self.settings.fleet_drop_speed
+        self.settings.fleet_direction *= -1
+
+    def _check_aliens_bottom(self):
+        # Проверяет, добрались ли пришельцы до нижнего края экрана.
+        screen_rect = self.screen.get_rect()
+        for alien in self.aliens.sprites():
+            if alien.rect.bottom >= screen_rect.bottom:
+                # Происходит то же, что при столкновении с кораблем.
+                self._ship_hit()
+                break
 
     def _update_screen(self):
         # При каждом проходе цикла перерисовывается экран.
         self.screen.fill(self.settings.bg_color)
         self.ship.blitme()
-        for bulllet in self.bullets.sprites():
-            bulllet.draw_bullet()
+        for bullet in self.bullets.sprites():
+            bullet.draw_bullet()
         self.aliens.draw(self.screen)
 
         # Отображение последнего прорисованного экрана.
